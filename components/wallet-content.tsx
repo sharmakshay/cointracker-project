@@ -1,12 +1,12 @@
 "use client";
 
 import { Check, Copy, Pencil, RefreshCw } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import type { Wallet } from "@/lib/api-client";
+import type { PaginatedTransactionsResponse, Wallet } from "@/lib/api-client";
 import {
+	useInfiniteWalletTransactions,
 	useSyncWallet,
-	useWalletTransactions,
 } from "@/lib/queries/wallet-queries";
 import { Button } from "./ui/button";
 
@@ -15,19 +15,40 @@ const truncateAddress = (address: string) => {
 	return `${address.slice(0, address.startsWith("0x") ? 6 : 4)}...${address.slice(-5)}`;
 };
 
+const PAGE_SIZE = 20;
+
 type WalletContentProps = {
 	wallet: Wallet;
 };
 
 export function WalletContent({ wallet }: WalletContentProps) {
 	const [isCopied, setIsCopied] = useState(false);
+	const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
 	const {
-		data: transactions = [],
+		data,
 		isLoading,
 		error,
-	} = useWalletTransactions(wallet.id);
+		fetchNextPage,
+		hasNextPage,
+		isFetchingNextPage,
+	} = useInfiniteWalletTransactions(wallet.id, PAGE_SIZE);
 	const syncWalletMutation = useSyncWallet();
+
+	useEffect(() => {
+		const el = loadMoreRef.current;
+		if (!el) return;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage) {
+					fetchNextPage();
+				}
+			},
+			{ threshold: 0.1 },
+		);
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
 	const handleSync = async () => {
 		try {
@@ -50,8 +71,14 @@ export function WalletContent({ wallet }: WalletContentProps) {
 		}
 	};
 
-	// Calculate total balance from transactions
-	const totalBalance = transactions.reduce((sum, tx) => sum + tx.balance, 0);
+	// Flatten pages
+	const transactions =
+		(data?.pages as PaginatedTransactionsResponse[] | undefined)?.flatMap(
+			(p) => p.items,
+		) ?? [];
+	const stableTotalBalance =
+		(data?.pages?.[0] as PaginatedTransactionsResponse | undefined)
+			?.totalBalance ?? 0;
 
 	return (
 		<div
@@ -106,7 +133,7 @@ export function WalletContent({ wallet }: WalletContentProps) {
 
 				<div className="text-5xl font-bold mb-8" style={{ color: "#202020" }}>
 					$
-					{totalBalance.toLocaleString("en-US", {
+					{stableTotalBalance.toLocaleString("en-US", {
 						minimumFractionDigits: 2,
 						maximumFractionDigits: 2,
 					})}
@@ -142,53 +169,66 @@ export function WalletContent({ wallet }: WalletContentProps) {
 							</p>
 						</div>
 					) : (
-						transactions.map((transaction) => {
-							const isPositive = transaction.balance > 0;
-							const transactionDate = new Date(
-								transaction.date,
-							).toLocaleDateString();
+						<>
+							{transactions.map((transaction) => {
+								const isPositive = transaction.balance > 0;
+								const transactionDate = new Date(
+									transaction.date,
+								).toLocaleDateString();
 
-							return (
-								<div
-									key={transaction.id}
-									className="flex items-center justify-between p-4 rounded-xl"
-									style={{ backgroundColor: "#ffffff" }}
-								>
-									<div className="flex items-center gap-4 flex-1">
-										<span className="text-sm" style={{ color: "#202020" }}>
-											Transaction {transaction.id.slice(0, 8)}...
-										</span>
+								return (
+									<div
+										key={transaction.id}
+										className="flex items-center justify-between p-4 rounded-xl"
+										style={{ backgroundColor: "#ffffff" }}
+									>
+										<div className="flex items-center gap-4 flex-1">
+											<span className="text-sm" style={{ color: "#202020" }}>
+												Transaction {transaction.id.slice(0, 8)}...
+											</span>
+											<span
+												className="px-3 py-1 rounded-md text-xs font-medium"
+												style={{
+													backgroundColor: isPositive ? "#e2fbe8" : "#fae3e3",
+													color: isPositive ? "#3ea44b" : "#d42422",
+												}}
+											>
+												{isPositive ? "Received" : "Sent"}
+											</span>
+											<span className="text-sm" style={{ color: "#838383" }}>
+												{transactionDate}
+											</span>
+											<span className="text-sm" style={{ color: "#838383" }}>
+												{transaction.confirmations} confirmations
+											</span>
+										</div>
 										<span
-											className="px-3 py-1 rounded-md text-xs font-medium"
+											className="text-sm font-medium"
 											style={{
-												backgroundColor: isPositive ? "#e2fbe8" : "#fae3e3",
 												color: isPositive ? "#3ea44b" : "#d42422",
 											}}
 										>
-											{isPositive ? "Received" : "Sent"}
-										</span>
-										<span className="text-sm" style={{ color: "#838383" }}>
-											{transactionDate}
-										</span>
-										<span className="text-sm" style={{ color: "#838383" }}>
-											{transaction.confirmations} confirmations
+											{isPositive ? "+" : ""}$
+											{transaction.balance.toLocaleString("en-US", {
+												minimumFractionDigits: 2,
+												maximumFractionDigits: 2,
+											})}
 										</span>
 									</div>
-									<span
-										className="text-sm font-medium"
-										style={{
-											color: isPositive ? "#3ea44b" : "#d42422",
-										}}
-									>
-										{isPositive ? "+" : ""}$
-										{transaction.balance.toLocaleString("en-US", {
-											minimumFractionDigits: 2,
-											maximumFractionDigits: 2,
-										})}
-									</span>
+								);
+							})}
+
+							{/* Sentinel for infinite scroll */}
+							{hasNextPage && <div ref={loadMoreRef} className="h-8" />}
+							{isFetchingNextPage && (
+								<div className="flex justify-center py-4">
+									<div
+										className="animate-spin rounded-full h-8 w-8 border-b-2"
+										style={{ borderColor: "#8c8fff" }}
+									></div>
 								</div>
-							);
-						})
+							)}
+						</>
 					)}
 				</div>
 			</div>

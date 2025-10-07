@@ -24,6 +24,12 @@ export interface ApiError {
 	error: string;
 }
 
+export interface PaginatedTransactionsResponse {
+	items: Transaction[];
+	nextCursor: string | null;
+	totalBalance: number;
+}
+
 class ApiClient {
 	private baseUrl: string;
 
@@ -69,9 +75,23 @@ class ApiClient {
 		return this.request<Wallet[]>("/api/wallets");
 	}
 
-	// GET /wallets/:walletId - Get wallet transactions
+	// GET /wallets/:walletId - Get wallet transactions (full list)
 	async getWalletTransactions(walletId: string): Promise<Transaction[]> {
 		return this.request<Transaction[]>(`/api/wallets/${walletId}`);
+	}
+
+	// GET /wallets/:walletId with pagination
+	async getWalletTransactionsPage(
+		walletId: string,
+		params: { cursor?: string | null; limit?: number } = {},
+	): Promise<PaginatedTransactionsResponse> {
+		const qs = new URLSearchParams();
+		if (params.cursor) qs.set("cursor", params.cursor);
+		if (params.limit) qs.set("limit", String(params.limit));
+		const suffix = qs.toString() ? `?${qs.toString()}` : "";
+		return this.request<PaginatedTransactionsResponse>(
+			`/api/wallets/${walletId}${suffix}`,
+		);
 	}
 
 	// POST /wallets - Create new wallet
