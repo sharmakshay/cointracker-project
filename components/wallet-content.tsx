@@ -1,37 +1,18 @@
 "use client";
 
 import { Check, Copy, Pencil, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
+import { toast } from "sonner";
+import type { Wallet } from "@/lib/api-client";
+import {
+	useSyncWallet,
+	useWalletTransactions,
+} from "@/lib/queries/wallet-queries";
 import { Button } from "./ui/button";
-import type { Wallet } from "./wallet-dashboard";
-
-type Transaction = {
-	id: string;
-	address: string;
-	type: "received" | "sent";
-	date: string;
-	confirmations: number;
-	amount: string;
-};
 
 const truncateAddress = (address: string) => {
 	if (address.length <= 13) return address;
 	return `${address.slice(0, address.startsWith("0x") ? 6 : 4)}...${address.slice(-5)}`;
-};
-
-// Generate mock transactions
-const generateTransactions = (
-	count: number,
-	startId: number,
-): Transaction[] => {
-	return Array.from({ length: count }, (_, i) => ({
-		id: `${startId + i}`,
-		address: "0xcC6a9b3e8f2d4c1a7b5e9f3d2c8a4b6e1f7d9c5a225",
-		type: (startId + i) % 3 === 0 ? "sent" : "received", // Deterministic based on ID
-		date: "2024-01-15",
-		confirmations: 6,
-		amount: "0.5",
-	}));
 };
 
 type WalletContentProps = {
@@ -39,59 +20,25 @@ type WalletContentProps = {
 };
 
 export function WalletContent({ wallet }: WalletContentProps) {
-	const [transactions, setTransactions] = useState<Transaction[]>([]);
-	const [isLoading, setIsLoading] = useState(false);
-	const [hasMore, setHasMore] = useState(true);
 	const [isCopied, setIsCopied] = useState(false);
-	const [isInitialized, setIsInitialized] = useState(false);
-	const observerTarget = useRef<HTMLDivElement>(null);
 
-	const loadMoreTransactions = useCallback(() => {
-		if (isLoading || !hasMore) return;
+	const {
+		data: transactions = [],
+		isLoading,
+		error,
+	} = useWalletTransactions(wallet.id);
+	const syncWalletMutation = useSyncWallet();
 
-		setIsLoading(true);
-		// Simulate API call
-		setTimeout(() => {
-			const newTransactions = generateTransactions(20, transactions.length);
-			setTransactions((prev) => [...prev, ...newTransactions]);
-			setIsLoading(false);
-
-			// Stop loading after 100 transactions for demo
-			if (transactions.length >= 80) {
-				setHasMore(false);
-			}
-		}, 1000);
-	}, [isLoading, hasMore, transactions.length]);
-
-	// Initialize transactions on client side to avoid hydration issues
-	useEffect(() => {
-		if (!isInitialized) {
-			setTransactions(generateTransactions(20, 0));
-			setIsInitialized(true);
+	const handleSync = async () => {
+		try {
+			await syncWalletMutation.mutateAsync(wallet.id);
+			toast.success("Wallet synced successfully");
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to sync wallet",
+			);
 		}
-	}, [isInitialized]);
-
-	useEffect(() => {
-		const observer = new IntersectionObserver(
-			(entries) => {
-				if (entries[0].isIntersecting && hasMore && !isLoading) {
-					loadMoreTransactions();
-				}
-			},
-			{ threshold: 0.1 },
-		);
-
-		const currentTarget = observerTarget.current;
-		if (currentTarget) {
-			observer.observe(currentTarget);
-		}
-
-		return () => {
-			if (currentTarget) {
-				observer.unobserve(currentTarget);
-			}
-		};
-	}, [loadMoreTransactions, hasMore, isLoading]);
+	};
 
 	const copyAddress = async () => {
 		try {
@@ -102,6 +49,9 @@ export function WalletContent({ wallet }: WalletContentProps) {
 			console.error("Failed to copy address:", err);
 		}
 	};
+
+	// Calculate total balance from transactions
+	const totalBalance = transactions.reduce((sum, tx) => sum + tx.balance, 0);
 
 	return (
 		<div
@@ -133,11 +83,15 @@ export function WalletContent({ wallet }: WalletContentProps) {
 					</div>
 					<div className="flex gap-3">
 						<Button
+							onClick={handleSync}
+							disabled={syncWalletMutation.isPending}
 							className="rounded-full px-6 text-white font-medium"
 							style={{ backgroundColor: "#8c8fff" }}
 						>
-							<RefreshCw className="w-4 h-4 mr-2" />
-							Sync
+							<RefreshCw
+								className={`w-4 h-4 mr-2 ${syncWalletMutation.isPending ? "animate-spin" : ""}`}
+							/>
+							{syncWalletMutation.isPending ? "Syncing..." : "Sync"}
 						</Button>
 						<Button
 							variant="outline"
@@ -151,7 +105,11 @@ export function WalletContent({ wallet }: WalletContentProps) {
 				</div>
 
 				<div className="text-5xl font-bold mb-8" style={{ color: "#202020" }}>
-					$15,781.66
+					$
+					{totalBalance.toLocaleString("en-US", {
+						minimumFractionDigits: 2,
+						maximumFractionDigits: 2,
+					})}
 				</div>
 
 				<h2 className="text-sm font-medium" style={{ color: "#838383" }}>
@@ -162,76 +120,75 @@ export function WalletContent({ wallet }: WalletContentProps) {
 			{/* Transactions List */}
 			<div className="flex-1 overflow-y-auto px-8">
 				<div className="space-y-3 pb-8">
-					{!isInitialized ? (
+					{isLoading ? (
 						<div className="flex justify-center py-8">
 							<div
 								className="animate-spin rounded-full h-8 w-8 border-b-2"
 								style={{ borderColor: "#8c8fff" }}
 							></div>
 						</div>
+					) : error ? (
+						<div className="text-center py-8">
+							<div className="text-red-600 text-xl mb-2">⚠️</div>
+							<p className="text-red-600 mb-2">Failed to load transactions</p>
+							<p className="text-gray-600 text-sm">{error.message}</p>
+						</div>
+					) : transactions.length === 0 ? (
+						<div className="text-center py-8">
+							<div className="text-gray-400 text-4xl mb-4">📄</div>
+							<p className="text-gray-600 mb-2">No transactions found</p>
+							<p className="text-gray-500 text-sm">
+								Sync your wallet to see transactions
+							</p>
+						</div>
 					) : (
-						transactions.map((transaction) => (
-							<div
-								key={transaction.id}
-								className="flex items-center justify-between p-4 rounded-xl"
-								style={{ backgroundColor: "#ffffff" }}
-							>
-								<div className="flex items-center gap-4 flex-1">
-									<span className="text-sm" style={{ color: "#202020" }}>
-										{truncateAddress(transaction.address)}
-									</span>
+						transactions.map((transaction) => {
+							const isPositive = transaction.balance > 0;
+							const transactionDate = new Date(
+								transaction.date,
+							).toLocaleDateString();
+
+							return (
+								<div
+									key={transaction.id}
+									className="flex items-center justify-between p-4 rounded-xl"
+									style={{ backgroundColor: "#ffffff" }}
+								>
+									<div className="flex items-center gap-4 flex-1">
+										<span className="text-sm" style={{ color: "#202020" }}>
+											Transaction {transaction.id.slice(0, 8)}...
+										</span>
+										<span
+											className="px-3 py-1 rounded-md text-xs font-medium"
+											style={{
+												backgroundColor: isPositive ? "#e2fbe8" : "#fae3e3",
+												color: isPositive ? "#3ea44b" : "#d42422",
+											}}
+										>
+											{isPositive ? "Received" : "Sent"}
+										</span>
+										<span className="text-sm" style={{ color: "#838383" }}>
+											{transactionDate}
+										</span>
+										<span className="text-sm" style={{ color: "#838383" }}>
+											{transaction.confirmations} confirmations
+										</span>
+									</div>
 									<span
-										className="px-3 py-1 rounded-md text-xs font-medium"
+										className="text-sm font-medium"
 										style={{
-											backgroundColor:
-												transaction.type === "received" ? "#e2fbe8" : "#fae3e3",
-											color:
-												transaction.type === "received" ? "#3ea44b" : "#d42422",
+											color: isPositive ? "#3ea44b" : "#d42422",
 										}}
 									>
-										{transaction.type === "received" ? "Received" : "Sent"}
-									</span>
-									<span className="text-sm" style={{ color: "#838383" }}>
-										{transaction.date}
-									</span>
-									<span className="text-sm" style={{ color: "#838383" }}>
-										{transaction.confirmations} confirmations
+										{isPositive ? "+" : ""}$
+										{transaction.balance.toLocaleString("en-US", {
+											minimumFractionDigits: 2,
+											maximumFractionDigits: 2,
+										})}
 									</span>
 								</div>
-								<span
-									className="text-sm font-medium"
-									style={{
-										color:
-											transaction.type === "received" ? "#3ea44b" : "#d42422",
-									}}
-								>
-									{transaction.type === "received" ? "+" : "-"}{" "}
-									{transaction.amount} BTC
-								</span>
-							</div>
-						))
-					)}
-
-					{/* Loading indicator */}
-					{isLoading && (
-						<div className="flex justify-center py-4">
-							<div
-								className="animate-spin rounded-full h-8 w-8 border-b-2"
-								style={{ borderColor: "#8c8fff" }}
-							></div>
-						</div>
-					)}
-
-					{/* Intersection observer target */}
-					{isInitialized && <div ref={observerTarget} className="h-4" />}
-
-					{!hasMore && isInitialized && (
-						<div
-							className="text-center py-4 text-sm"
-							style={{ color: "#838383" }}
-						>
-							No more transactions
-						</div>
+							);
+						})
 					)}
 				</div>
 			</div>

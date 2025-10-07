@@ -1,47 +1,68 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { Wallet } from "@/lib/api-client";
+import { useWallets } from "@/lib/queries/wallet-queries";
 import { WalletContent } from "./wallet-content";
 import { WalletSidebar } from "./wallet-sidebar";
 
-export type Wallet = {
-	id: string;
-	name: string;
-	address: string;
-	icon: string;
-	color: string;
-};
-
 export default function WalletDashboard() {
-	const [wallets, setWallets] = useState<Wallet[]>([
-		{
-			id: "1",
-			name: "Coinbase",
-			address: "0xcC6a9b3e8f2d4c1a7b5e9f3d2c8a4b6e1f7d9c5a225",
-			icon: "coinbase",
-			color: "#0354ff",
-		},
-		{
-			id: "2",
-			name: "Kraken",
-			address: "Hbd8x9y2z3a4b5c6d7e8f9g0h1i2j3k4l5m6n7o8p9q0FRn4l",
-			icon: "kraken",
-			color: "#5b3ed6",
-		},
-		{
-			id: "3",
-			name: "Phantom",
-			address: "3Rh0a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u2Agl4o",
-			icon: "phantom",
-			color: "#ab9ff2",
-		},
-	]);
+	const { data: wallets = [], isLoading, error } = useWallets();
+	const [selectedWallet, setSelectedWallet] = useState<Wallet | null>(null);
 
-	const [selectedWallet, setSelectedWallet] = useState<Wallet>(wallets[0]);
+	// Set the first wallet as selected when wallets are loaded
+	useEffect(() => {
+		if (wallets.length > 0 && !selectedWallet) {
+			setSelectedWallet(wallets[0]);
+		}
+	}, [wallets, selectedWallet]);
 
-	const handleAddWallet = (wallet: Wallet) => {
-		setWallets([...wallets, wallet]);
-	};
+	// Handle loading state
+	if (isLoading) {
+		return (
+			<div
+				className="flex h-screen items-center justify-center"
+				style={{ backgroundColor: "#fcfcfc" }}
+			>
+				<div className="text-center">
+					<div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+					<p className="text-gray-600">Loading wallets...</p>
+				</div>
+			</div>
+		);
+	}
+
+	// Handle error state
+	if (error) {
+		return (
+			<div
+				className="flex h-screen items-center justify-center"
+				style={{ backgroundColor: "#fcfcfc" }}
+			>
+				<div className="text-center">
+					<div className="text-red-600 text-xl mb-4">⚠️</div>
+					<p className="text-red-600 mb-2">Failed to load wallets</p>
+					<p className="text-gray-600 text-sm">{error.message}</p>
+				</div>
+			</div>
+		);
+	}
+
+	// Handle empty state
+	if (wallets.length === 0) {
+		return (
+			<div
+				className="flex h-screen items-center justify-center"
+				style={{ backgroundColor: "#fcfcfc" }}
+			>
+				<div className="text-center">
+					<div className="text-gray-400 text-4xl mb-4">💼</div>
+					<p className="text-gray-600 mb-2">No wallets found</p>
+					<p className="text-gray-500 text-sm">Add a wallet to get started</p>
+				</div>
+			</div>
+		);
+	}
 
 	return (
 		<div className="flex h-screen" style={{ backgroundColor: "#fcfcfc" }}>
@@ -49,9 +70,8 @@ export default function WalletDashboard() {
 				wallets={wallets}
 				selectedWallet={selectedWallet}
 				onSelectWallet={setSelectedWallet}
-				onAddWallet={handleAddWallet}
 			/>
-			<WalletContent wallet={selectedWallet} />
+			{selectedWallet && <WalletContent wallet={selectedWallet} />}
 		</div>
 	);
 }

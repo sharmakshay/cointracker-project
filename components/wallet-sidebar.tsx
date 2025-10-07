@@ -1,16 +1,17 @@
 "use client";
 
-import { Plus, WalletIcon } from "lucide-react";
+import { Plus, Trash2, WalletIcon } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
+import type { Wallet } from "@/lib/api-client";
+import { useCreateWallet, useDeleteWallet } from "@/lib/queries/wallet-queries";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import type { Wallet } from "./wallet-dashboard";
 
 type WalletSidebarProps = {
 	wallets: Wallet[];
-	selectedWallet: Wallet;
+	selectedWallet: Wallet | null;
 	onSelectWallet: (wallet: Wallet) => void;
-	onAddWallet: (wallet: Wallet) => void;
 };
 
 const truncateAddress = (address: string) => {
@@ -22,23 +23,42 @@ export function WalletSidebar({
 	wallets,
 	selectedWallet,
 	onSelectWallet,
-	onAddWallet,
 }: WalletSidebarProps) {
 	const [isAdding, setIsAdding] = useState(false);
 	const [newWalletAddress, setNewWalletAddress] = useState("");
 
-	const handleSave = () => {
-		if (newWalletAddress) {
-			const newWallet: Wallet = {
-				id: Date.now().toString(),
-				name: "Wallet",
-				address: newWalletAddress,
-				icon: "generic",
-				color: "#8c8fff",
-			};
-			onAddWallet(newWallet);
-			setNewWalletAddress("");
-			setIsAdding(false);
+	const createWalletMutation = useCreateWallet();
+	const deleteWalletMutation = useDeleteWallet();
+
+	const handleSave = async () => {
+		if (newWalletAddress.trim()) {
+			try {
+				await createWalletMutation.mutateAsync({
+					address: newWalletAddress.trim(),
+				});
+				toast.success("Wallet added successfully");
+				setNewWalletAddress("");
+				setIsAdding(false);
+			} catch (error) {
+				toast.error(
+					error instanceof Error ? error.message : "Failed to add wallet",
+				);
+			}
+		}
+	};
+
+	const handleDeleteWallet = async (
+		walletId: string,
+		event: React.MouseEvent,
+	) => {
+		event.stopPropagation();
+		try {
+			await deleteWalletMutation.mutateAsync(walletId);
+			toast.success("Wallet deleted successfully");
+		} catch (error) {
+			toast.error(
+				error instanceof Error ? error.message : "Failed to delete wallet",
+			);
 		}
 	};
 
@@ -53,31 +73,40 @@ export function WalletSidebar({
 			style={{ backgroundColor: "#ffffff" }}
 		>
 			{wallets.map((wallet) => (
-				<button
-					type="button"
-					key={wallet.id}
-					onClick={() => onSelectWallet(wallet)}
-					className="flex items-center gap-3 p-4 rounded-2xl transition-colors hover:opacity-80"
-					style={{
-						backgroundColor:
-							selectedWallet.id === wallet.id ? "#f7f7ff" : "#f9f9f9",
-					}}
-				>
-					<div
-						className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold"
-						style={{ backgroundColor: wallet.color }}
+				<div key={wallet.id} className="relative group">
+					<button
+						type="button"
+						onClick={() => onSelectWallet(wallet)}
+						className="flex items-center gap-3 p-4 rounded-2xl transition-colors hover:opacity-80 w-full"
+						style={{
+							backgroundColor:
+								selectedWallet?.id === wallet.id ? "#f7f7ff" : "#f9f9f9",
+						}}
 					>
-						{wallet.name.charAt(0)}
-					</div>
-					<div className="flex-1 text-left">
-						<div className="font-medium text-sm" style={{ color: "#202020" }}>
-							{wallet.name}
+						<div
+							className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold"
+							style={{ backgroundColor: "#8c8fff" }}
+						>
+							{wallet.name.charAt(0).toUpperCase()}
 						</div>
-						<div className="text-xs" style={{ color: "#838383" }}>
-							{truncateAddress(wallet.address)}
+						<div className="flex-1 text-left">
+							<div className="font-medium text-sm" style={{ color: "#202020" }}>
+								{wallet.name}
+							</div>
+							<div className="text-xs" style={{ color: "#838383" }}>
+								{truncateAddress(wallet.address)}
+							</div>
 						</div>
-					</div>
-				</button>
+					</button>
+					<button
+						type="button"
+						onClick={(e) => handleDeleteWallet(wallet.id, e)}
+						className="absolute right-2 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-full hover:bg-red-100"
+						title="Delete wallet"
+					>
+						<Trash2 className="w-4 h-4 text-red-500" />
+					</button>
+				</div>
 			))}
 
 			{isAdding && (
@@ -124,10 +153,13 @@ export function WalletSidebar({
 					</Button>
 					<Button
 						onClick={handleSave}
+						disabled={
+							!newWalletAddress.trim() || createWalletMutation.isPending
+						}
 						className="flex-1 rounded-2xl py-6 text-white font-medium"
 						style={{ backgroundColor: "#8c8fff" }}
 					>
-						Save
+						{createWalletMutation.isPending ? "Saving..." : "Save"}
 					</Button>
 				</div>
 			)}
