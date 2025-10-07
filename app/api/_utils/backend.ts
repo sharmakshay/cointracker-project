@@ -1,10 +1,6 @@
 export function getBackendBaseUrl(): string {
 	// Prefer server-only env var if provided, otherwise fall back to public for convenience
-	return (
-		process.env.BACKEND_API_URL ||
-		process.env.NEXT_PUBLIC_API_URL ||
-		"http://localhost:3001"
-	);
+	return process.env.BACKEND_API_URL || "http://localhost:3000";
 }
 
 export async function forwardRequest(path: string, init?: RequestInit) {
